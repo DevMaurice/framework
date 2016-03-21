@@ -5,7 +5,7 @@ use Illuminate\Http\Response;
 use Symfony\Component\DomCrawler\Crawler;
 use Illuminate\Foundation\Testing\Concerns\MakesHttpRequests;
 
-class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
+class FoundationInteractsWithPagesTest extends PHPUnit_Framework_TestCase
 {
     use MakesHttpRequests;
 
@@ -124,9 +124,9 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
         $this->dontSeeLink('Symfony', 'https://symfonyc.com');
     }
 
-    protected function getInputHtml()
+    protected function getInputHtml($name = 'framework', $value = 'Laravel')
     {
-        return '<input type="text" name="framework" value="Laravel">';
+        return sprintf('<input type="text" name="%s" value="%s">', $name, $value);
     }
 
     public function testSeeInInput()
@@ -139,6 +139,10 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
     {
         $this->setCrawler($this->getInputHtml());
         $this->dontSeeInField('framework', 'Rails');
+        $this->dontSeeInField('framework', 'laravel');
+
+        $this->setCrawler($this->getInputHtml('number', ''));
+        $this->dontSeeInField('number', '0');
     }
 
     protected function getInputArrayHtml()
@@ -178,10 +182,10 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
     protected function getSelectHtml()
     {
         return
-         '<select name="availability">'
-        .'    <option value="partial_time">Partial time</option>'
-        .'    <option value="full_time" selected>Full time</option>'
-        .'</select>';
+         '<select name="availability">
+              <option value="partial_time">Partial time</option>
+              <option value="full_time" selected>Full time</option>
+          </select>';
     }
 
     public function testSeeOptionIsSelected()
@@ -194,6 +198,103 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
     {
         $this->setCrawler($this->getSelectHtml());
         $this->dontSeeIsSelected('availability', 'partial_time');
+    }
+
+    protected function getEmptySelectHtml()
+    {
+        return
+          '<select name="category">
+              <option value="" selected>Select</option>
+              <option value="0">Other</option>
+          </select>';
+    }
+
+    public function testDontSeeOptionIsSelectedInEmptySelect()
+    {
+        $this->setCrawler($this->getEmptySelectHtml());
+        $this->dontSeeIsSelected('category', '0');
+        $this->dontSeeIsSelected('category', 0);
+    }
+
+    protected function getMultipleSelectHtml()
+    {
+        return
+         '<select name="roles[]">
+              <option value="admin">Administrator</option>
+              <option value="user" selected>User</option>
+              <option value="journalist">Journalist</option>
+              <option value="reviewer" selected>Reviewer</option>
+          </select>';
+    }
+
+    public function testSeeMultipleOptionsAreSelected()
+    {
+        $this->setCrawler($this->getMultipleSelectHtml());
+        $this->seeIsSelected('roles[]', 'user');
+        $this->seeIsSelected('roles[]', 'reviewer');
+    }
+
+    public function testDontSeeMultipleOptionsAreSelected()
+    {
+        $this->setCrawler($this->getMultipleSelectHtml());
+        $this->dontSeeIsSelected('roles[]', 'admin');
+        $this->dontSeeIsSelected('roles[]', 'journalist');
+    }
+
+    protected function getSelectWithOptGroupHtml()
+    {
+        return
+            '<select name="technology">
+                <optgroup label="PHP">
+                    <option value="laravel" selected>Laravel</option>
+                    <option value="symfony">Symfony</option>
+                </optgroup>
+                <optgroup label="JavaScript">
+                    <option value="angular">AngularJS</option>
+                    <option value="vue">Vue.js</option>
+                </optgroup>
+            </select>';
+    }
+
+    public function testSeeOptionInOptgroupIsSelected()
+    {
+        $this->setCrawler($this->getSelectWithOptGroupHtml());
+        $this->seeIsSelected('technology', 'laravel');
+    }
+
+    public function testDontseeOptionInOptgroupIsSelected()
+    {
+        $this->setCrawler($this->getSelectWithOptGroupHtml());
+        $this->dontSeeIsSelected('technology', 'symfony');
+    }
+
+    protected function getSelectMultipleWithOptGroupHtml()
+    {
+        return
+            '<select name="technologies[]">
+                <optgroup label="PHP">
+                    <option value="laravel" selected>Laravel</option>
+                    <option value="symfony">Symfony</option>
+                </optgroup>
+                <optgroup label="JavaScript">
+                    <option value="angular">AngularJS</option>
+                    <option value="vue" selected>Vue.js</option>
+                </optgroup>
+            </select>';
+    }
+
+    public function testSeeOptionsInOptgroupAreSelected()
+    {
+        $this->setCrawler($this->getSelectMultipleWithOptGroupHtml());
+        $this->seeIsSelected('technologies[]', 'laravel');
+        $this->seeIsSelected('technologies[]', 'vue');
+    }
+
+    public function testDontseeOptionsInOptgroupAreSelected()
+    {
+        $this->setCrawler($this->getSelectMultipleWithOptGroupHtml());
+        $this->dontSeeIsSelected('technologies[]', 'symfony');
+        $this->dontSeeIsSelected('technologies[]', 'angular');
     }
 
     protected function getRadiosHtml()
@@ -218,8 +319,8 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
     protected function getCheckboxesHtml()
     {
         return
-             '<input type="checkbox" name="terms" checked>'
-            .'<input type="checkbox" name="list">';
+             '<input type="checkbox" name="terms" checked>
+              <input type="checkbox" name="list">';
     }
 
     public function testSeeCheckboxIsChecked()
@@ -232,6 +333,36 @@ class FoundationCrawlerTraitIntegrationTest extends PHPUnit_Framework_TestCase
     {
         $this->setCrawler($this->getCheckboxesHtml());
         $this->dontSeeIsChecked('list');
+    }
+
+    public function testSeeElement()
+    {
+        $this->setCrawler('<image>');
+        $this->seeElement('image');
+    }
+
+    public function testSeeElementWithAttributes()
+    {
+        $this->setCrawler('<image width="100" height="50">');
+        $this->seeElement('image', ['width' => 100, 'height' => 50]);
+
+        $this->setCrawler('<select><option value="laravel" selected>Laravel</option>');
+        $this->seeElement('option', ['value' => 'laravel', 'selected']);
+
+        $this->setCrawler('<input name="name" id="name" type="text" required>');
+        $this->seeElement('#name', ['required']);
+    }
+
+    public function testDontSeeElement()
+    {
+        $this->setCrawler('<image class="img">');
+        $this->dontSeeElement('iframe');
+        $this->dontSeeElement('image', ['id']);
+        $this->dontSeeElement('image', ['class' => 'video']);
+
+        $this->setCrawler('<input type="text">');
+        $this->dontSeeElement('textarea');
+        $this->dontSeeElement('input', ['required']);
     }
 
     protected function getLayoutHtml()

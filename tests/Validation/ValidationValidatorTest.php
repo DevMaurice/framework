@@ -180,6 +180,40 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('NAME is required!', $v->messages()->first('name'));
     }
 
+    public function testAttributeNamesAreReplacedInArrays()
+    {
+        $trans = $this->getRealTranslator();
+        $trans->addResource('array', ['validation.required' => ':attribute is required!'], 'en', 'messages');
+        $v = new Validator($trans, ['users' => [['country_code' => 'US'], ['country_code' => null]]], ['users.*.country_code' => 'Required']);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('users.1.country_code is required!', $v->messages()->first('users.1.country_code'));
+
+        $trans = $this->getRealTranslator();
+        $trans->addResource('array', [
+            'validation.string' => ':attribute must be a string!',
+            'validation.attributes.name.*' => 'Any name',
+        ], 'en', 'messages');
+        $v = new Validator($trans, ['name' => ['Jon', 2]], ['name.*' => 'string']);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('Any name must be a string!', $v->messages()->first('name.1'));
+
+        $trans = $this->getRealTranslator();
+        $trans->addResource('array', ['validation.string' => ':attribute must be a string!'], 'en', 'messages');
+        $v = new Validator($trans, ['name' => ['Jon', 2]], ['name.*' => 'string']);
+        $v->setAttributeNames(['name.*' => 'Any name']);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('Any name must be a string!', $v->messages()->first('name.1'));
+
+        $v = new Validator($trans, ['users' => [['name' => 'Jon'], ['name' => 2]]], ['users.*.name' => 'string']);
+        $v->setAttributeNames(['users.*.name' => 'Any name']);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('Any name must be a string!', $v->messages()->first('users.1.name'));
+    }
+
     public function testDisplayableValuesAreReplaced()
     {
         //required_if:foo,bar
@@ -268,6 +302,27 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('all are really required!', $v->messages()->first('name.1'));
     }
 
+    public function testValidationDotCustomDotAnythingCanBeTranslated()
+    {
+        $trans = $this->getIlluminateArrayTranslator();
+        $trans->getLoader()->addMessages('en', 'validation', [
+            'required' => 'required!',
+            'custom' => [
+                'validation' => [
+                    'custom.*' => [
+                        'integer' => 'should be integer!',
+                    ],
+                ],
+            ],
+        ]);
+        $v = new Validator($trans, ['validation' => ['custom' => ['string', 'string']]], []);
+        $v->each('validation.custom', 'integer');
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('should be integer!', $v->messages()->first('validation.custom.0'));
+        $this->assertEquals('should be integer!', $v->messages()->first('validation.custom.1'));
+    }
+
     public function testInlineValidationMessagesAreRespected()
     {
         $trans = $this->getRealTranslator();
@@ -302,6 +357,25 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($v->passes());
 
         $v = new Validator($trans, ['foo' => new Symfony\Component\HttpFoundation\File\File('/tmp/foo', false)], ['foo' => 'Array']);
+        $this->assertFalse($v->passes());
+    }
+
+    public function testValidateFilled()
+    {
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, [], ['name' => 'filled']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['name' => ''], ['name' => 'filled']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['foo' => [['id' => 1], []]], ['foo.*.id' => 'filled']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['foo' => [['id' => '']]], ['foo.*.id' => 'filled']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['foo' => [['id' => null]]], ['foo.*.id' => 'filled']);
         $this->assertFalse($v->passes());
     }
 
@@ -569,6 +643,29 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $v = new Validator($trans, ['first' => 'dayle', 'last' => ''], ['last' => 'RequiredUnless:first,taylor,sven']);
         $this->assertFalse($v->passes());
         $this->assertEquals('The last field is required unless first is in taylor, sven.', $v->messages()->first('last'));
+    }
+
+    public function testValidateInArray()
+    {
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => [1, 2, 3], 'bar' => [1, 2]], ['foo.*' => 'in_array:bar.*']);
+        $this->assertFalse($v->passes());
+
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => [1, 2], 'bar' => [1, 2, 3]], ['foo.*' => 'in_array:bar.*']);
+        $this->assertTrue($v->passes());
+
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => [['bar_id' => 5], ['bar_id' => 2]], 'bar' => [['id' => 1, ['id' => 2]]]], ['foo.*.bar_id' => 'in_array:bar.*.id']);
+        $this->assertFalse($v->passes());
+
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => [['bar_id' => 1], ['bar_id' => 2]], 'bar' => [['id' => 1, ['id' => 2]]]], ['foo.*.bar_id' => 'in_array:bar.*.id']);
+        $this->assertTrue($v->passes());
+
+        $trans->addResource('array', ['validation.in_array' => 'The value of :attribute does not exist in :other.'], 'en', 'messages');
+        $v = new Validator($trans, ['foo' => [1, 2, 3], 'bar' => [1, 2]], ['foo.*' => 'in_array:bar.*']);
+        $this->assertEquals('The value of foo.2 does not exist in bar.*.', $v->messages()->first('foo.2'));
     }
 
     public function testValidateConfirmed()
@@ -1031,6 +1128,41 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
 
         $v = new Validator($trans, ['name' => 'foo'], ['name' => 'NotIn:foo,baz']);
         $this->assertFalse($v->passes());
+    }
+
+    public function testValidateDistinct()
+    {
+        $trans = $this->getRealTranslator();
+
+        $v = new Validator($trans, ['foo' => ['foo', 'foo']], ['foo.*' => 'distinct']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['foo' => ['foo', 'bar']], ['foo.*' => 'distinct']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['foo' => ['bar' => ['id' => 1], 'baz' => ['id' => 1]]], ['foo.*.id' => 'distinct']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['foo' => ['bar' => ['id' => 1], 'baz' => ['id' => 2]]], ['foo.*.id' => 'distinct']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['foo' => [['id' => 1], ['id' => 1]]], ['foo.*.id' => 'distinct']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['foo' => [['id' => 1], ['id' => 2]]], ['foo.*.id' => 'distinct']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['cat' => [['prod' => [['id' => 1]]], ['prod' => [['id' => 1]]]]], ['cat.*.prod.*.id' => 'distinct']);
+        $this->assertFalse($v->passes());
+
+        $v = new Validator($trans, ['cat' => [['prod' => [['id' => 1]]], ['prod' => [['id' => 2]]]]], ['cat.*.prod.*.id' => 'distinct']);
+        $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['foo' => ['foo', 'foo']], ['foo.*' => 'distinct'], ['foo.*.distinct' => 'There is a duplication!']);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+        $this->assertEquals('There is a duplication!', $v->messages()->first('foo.0'));
+        $this->assertEquals('There is a duplication!', $v->messages()->first('foo.1'));
     }
 
     public function testValidateUnique()
@@ -2482,6 +2614,19 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
 
     public function testInlineMessagesMayUseAsteriskForEachRules()
     {
+    }
+
+    public function testUsingSettersWithImplicitRules()
+    {
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => ['a', 'b', 'c']], ['foo.*' => 'string']);
+        $v->setData(['foo' => ['a', 'b', 'c', 4]]);
+        $this->assertFalse($v->passes());
+
+        $trans = $this->getRealTranslator();
+        $v = new Validator($trans, ['foo' => ['a', 'b', 'c']], ['foo.*' => 'string']);
+        $v->setRules(['foo.*' => 'integer']);
+        $this->assertFalse($v->passes());
     }
 
     protected function getTranslator()

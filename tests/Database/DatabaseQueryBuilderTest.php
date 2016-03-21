@@ -161,7 +161,7 @@ class DatabaseQueryBuilderTest extends PHPUnit_Framework_TestCase
     {
         $builder = $this->getPostgresBuilder();
         $builder->select('*')->from('users')->whereDate('created_at', '=', '2015-12-21');
-        $this->assertEquals('select * from "users" where "created_at" = ?::date', $builder->toSql());
+        $this->assertEquals('select * from "users" where "created_at"::date = ?', $builder->toSql());
         $this->assertEquals([0 => '2015-12-21'], $builder->getBindings());
     }
 
@@ -1144,6 +1144,40 @@ class DatabaseQueryBuilderTest extends PHPUnit_Framework_TestCase
         $builder = $this->getMySqlBuilder();
         $builder->select('*')->from('users');
         $this->assertEquals('select * from `users`', $builder->toSql());
+    }
+
+    public function testMySqlWrappingJson()
+    {
+        $builder = $this->getMySqlBuilder();
+        $builder->select('*')->from('users')->whereRaw('items->"$.price" = 1');
+        $this->assertEquals('select * from `users` where items->"$.price" = 1', $builder->toSql());
+
+        $builder = $this->getMySqlBuilder();
+        $builder->select('items->price')->from('users')->where('items->price', '=', 1)->orderBy('items->price');
+        $this->assertEquals('select items->"$.price" from `users` where items->"$.price" = ? order by items->"$.price" asc', $builder->toSql());
+
+        $builder = $this->getMySqlBuilder();
+        $builder->select('*')->from('users')->where('items->price->in_usd', '=', 1);
+        $this->assertEquals('select * from `users` where items->"$.price.in_usd" = ?', $builder->toSql());
+
+        $builder = $this->getMySqlBuilder();
+        $builder->select('*')->from('users')->where('items->price->in_usd', '=', 1)->where('items->age', '=', 2);
+        $this->assertEquals('select * from `users` where items->"$.price.in_usd" = ? and items->"$.age" = ?', $builder->toSql());
+    }
+
+    public function testPostgresWrappingJson()
+    {
+        $builder = $this->getPostgresBuilder();
+        $builder->select('items->price')->from('users')->where('items->price', '=', 1)->orderBy('items->price');
+        $this->assertEquals('select items->>\'price\' from "users" where items->>\'price\' = ? order by items->>\'price\' asc', $builder->toSql());
+
+        $builder = $this->getPostgresBuilder();
+        $builder->select('*')->from('users')->where('items->price->in_usd', '=', 1);
+        $this->assertEquals('select * from "users" where items->\'price\'->>\'in_usd\' = ?', $builder->toSql());
+
+        $builder = $this->getPostgresBuilder();
+        $builder->select('*')->from('users')->where('items->price->in_usd', '=', 1)->where('items->age', '=', 2);
+        $this->assertEquals('select * from "users" where items->\'price\'->>\'in_usd\' = ? and items->>\'age\' = ?', $builder->toSql());
     }
 
     public function testSQLiteOrderBy()
