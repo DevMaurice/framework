@@ -35,11 +35,17 @@ class Grammar extends BaseGrammar
      */
     public function compileSelect(Builder $query)
     {
+        $original = $query->columns;
+
         if (is_null($query->columns)) {
             $query->columns = ['*'];
         }
 
-        return trim($this->concatenate($this->compileComponents($query)));
+        $sql = trim($this->concatenate($this->compileComponents($query)));
+
+        $query->columns = $original;
+
+        return $sql;
     }
 
     /**
@@ -164,11 +170,15 @@ class Grammar extends BaseGrammar
     /**
      * Create a join clause constraint segment.
      *
-     * @param  array   $clause
+     * @param  array  $clause
      * @return string
      */
     protected function compileJoinConstraint(array $clause)
     {
+        if ($clause['nested']) {
+            return $this->compileNestedJoinConstraint($clause);
+        }
+
         $first = $this->wrap($clause['first']);
 
         if ($clause['where']) {
@@ -182,6 +192,27 @@ class Grammar extends BaseGrammar
         }
 
         return "{$clause['boolean']} $first {$clause['operator']} $second";
+    }
+
+    /**
+     * Create a nested join clause constraint segment.
+     *
+     * @param  array  $clause
+     * @return string
+     */
+    protected function compileNestedJoinConstraint(array $clause)
+    {
+        $clauses = [];
+
+        foreach ($clause['join']->clauses as $nestedClause) {
+            $clauses[] = $this->compileJoinConstraint($nestedClause);
+        }
+
+        $clauses[0] = $this->removeLeadingBoolean($clauses[0]);
+
+        $clauses = implode(' ', $clauses);
+
+        return "{$clause['boolean']} ({$clauses})";
     }
 
     /**

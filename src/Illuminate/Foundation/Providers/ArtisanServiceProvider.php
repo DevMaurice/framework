@@ -4,8 +4,10 @@ namespace Illuminate\Foundation\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Queue\Console\TableCommand;
+use Illuminate\Auth\Console\MakeAuthCommand;
 use Illuminate\Foundation\Console\UpCommand;
 use Illuminate\Foundation\Console\DownCommand;
+use Illuminate\Auth\Console\ClearResetsCommand;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Cache\Console\CacheTableCommand;
 use Illuminate\Queue\Console\FailedTableCommand;
@@ -24,7 +26,6 @@ use Illuminate\Foundation\Console\RouteCacheCommand;
 use Illuminate\Foundation\Console\RouteClearCommand;
 use Illuminate\Routing\Console\ControllerMakeCommand;
 use Illuminate\Routing\Console\MiddlewareMakeCommand;
-use Illuminate\Foundation\Console\CommandMakeCommand;
 use Illuminate\Foundation\Console\ConfigCacheCommand;
 use Illuminate\Foundation\Console\ConfigClearCommand;
 use Illuminate\Foundation\Console\ConsoleMakeCommand;
@@ -37,7 +38,6 @@ use Illuminate\Foundation\Console\ClearCompiledCommand;
 use Illuminate\Foundation\Console\EventGenerateCommand;
 use Illuminate\Foundation\Console\VendorPublishCommand;
 use Illuminate\Database\Console\Seeds\SeederMakeCommand;
-use Illuminate\Database\Console\Migrations\MigrateMakeCommand;
 
 class ArtisanServiceProvider extends ServiceProvider
 {
@@ -55,6 +55,7 @@ class ArtisanServiceProvider extends ServiceProvider
      */
     protected $commands = [
         'ClearCompiled' => 'command.clear-compiled',
+        'ClearResets' => 'command.auth.resets.clear',
         'ConfigCache' => 'command.config.cache',
         'ConfigClear' => 'command.config.clear',
         'Down' => 'command.down',
@@ -76,8 +77,8 @@ class ArtisanServiceProvider extends ServiceProvider
      */
     protected $devCommands = [
         'AppName' => 'command.app.name',
+        'AuthMake' => 'command.auth.make',
         'CacheTable' => 'command.cache.table',
-        'CommandMake' => 'command.command.make',
         'ConsoleMake' => 'command.console.make',
         'ControllerMake' => 'command.controller.make',
         'EventGenerate' => 'command.event.generate',
@@ -85,7 +86,6 @@ class ArtisanServiceProvider extends ServiceProvider
         'JobMake' => 'command.job.make',
         'ListenerMake' => 'command.listener.make',
         'MiddlewareMake' => 'command.middleware.make',
-        'MigrationMake' => 'command.migration.make',
         'ModelMake' => 'command.model.make',
         'PolicyMake' => 'command.policy.make',
         'ProviderMake' => 'command.provider.make',
@@ -108,9 +108,9 @@ class ArtisanServiceProvider extends ServiceProvider
     {
         $this->registerCommands($this->commands);
 
-        if (! $this->app->environment('production')) {
+        //if (! $this->app->environment('production')) {
             $this->registerCommands($this->devCommands);
-        }
+        //}
     }
 
     /**
@@ -147,6 +147,18 @@ class ArtisanServiceProvider extends ServiceProvider
      *
      * @return void
      */
+    protected function registerAuthMakeCommand()
+    {
+        $this->app->singleton('command.auth.make', function ($app) {
+            return new MakeAuthCommand;
+        });
+    }
+
+    /**
+     * Register the command.
+     *
+     * @return void
+     */
     protected function registerCacheTableCommand()
     {
         $this->app->singleton('command.cache.table', function ($app) {
@@ -171,10 +183,10 @@ class ArtisanServiceProvider extends ServiceProvider
      *
      * @return void
      */
-    protected function registerCommandMakeCommand()
+    protected function registerClearResetsCommand()
     {
-        $this->app->singleton('command.command.make', function ($app) {
-            return new CommandMakeCommand($app['files']);
+        $this->app->singleton('command.auth.resets.clear', function () {
+            return new ClearResetsCommand;
         });
     }
 
@@ -319,25 +331,6 @@ class ArtisanServiceProvider extends ServiceProvider
     {
         $this->app->singleton('command.middleware.make', function ($app) {
             return new MiddlewareMakeCommand($app['files']);
-        });
-    }
-
-    /**
-     * Register the command.
-     *
-     * @return void
-     */
-    protected function registerMigrationMakeCommand()
-    {
-        $this->app->singleton('command.migration.make', function ($app) {
-            // Once we have the migration creator registered, we will create the command
-            // and inject the creator. The creator is responsible for the actual file
-            // creation of the migrations, and may be extended by these developers.
-            $creator = $app['migration.creator'];
-
-            $composer = $app['composer'];
-
-            return new MigrateMakeCommand($creator, $composer);
         });
     }
 

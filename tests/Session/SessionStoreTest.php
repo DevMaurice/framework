@@ -28,9 +28,11 @@ class SessionStoreTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($session->has('baz'));
     }
 
+    /**
+     * @expectedException InvalidArgumentException
+     */
     public function testSessionGetBagException()
     {
-        $this->setExpectedException('InvalidArgumentException');
         $session = $this->getSession();
         $session->getBag('doesNotExist');
     }
@@ -99,6 +101,7 @@ class SessionStoreTest extends PHPUnit_Framework_TestCase
         $session->start();
         $session->put('foo', 'bar');
         $session->flash('baz', 'boom');
+        $session->now('qux', 'norf');
         $session->getHandler()->shouldReceive('write')->once()->with(
             $this->getSessionId(),
             serialize([
@@ -158,6 +161,22 @@ class SessionStoreTest extends PHPUnit_Framework_TestCase
         $this->assertNull($session->get('foo'));
     }
 
+    public function testDataFlashingNow()
+    {
+        $session = $this->getSession();
+        $session->now('foo', 'bar');
+        $session->now('bar', 0);
+
+        $this->assertTrue($session->has('foo'));
+        $this->assertEquals('bar', $session->get('foo'));
+        $this->assertEquals(0, $session->get('bar'));
+
+        $session->ageFlashData();
+
+        $this->assertFalse($session->has('foo'));
+        $this->assertNull($session->get('foo'));
+    }
+
     public function testDataMergeNewFlashes()
     {
         $session = $this->getSession();
@@ -178,6 +197,15 @@ class SessionStoreTest extends PHPUnit_Framework_TestCase
         $session = $this->getSession();
         $session->flash('foo', 'bar');
         $session->set('flash.old', ['foo']);
+        $session->reflash();
+        $this->assertNotFalse(array_search('foo', $session->get('flash.new')));
+        $this->assertFalse(array_search('foo', $session->get('flash.old')));
+    }
+
+    public function testReflashWithNow()
+    {
+        $session = $this->getSession();
+        $session->now('foo', 'bar');
         $session->reflash();
         $this->assertNotFalse(array_search('foo', $session->get('flash.new')));
         $this->assertFalse(array_search('foo', $session->get('flash.old')));
@@ -239,10 +267,10 @@ class SessionStoreTest extends PHPUnit_Framework_TestCase
         $this->assertFalse($session->handlerNeedsRequest());
         $session->getHandler()->shouldReceive('setRequest')->never();
 
-        $session = new \Illuminate\Session\Store('test', m::mock(new \Illuminate\Session\CookieSessionHandler(new \Illuminate\Cookie\CookieJar(), 60)));
+        $session = new Illuminate\Session\Store('test', m::mock(new Illuminate\Session\CookieSessionHandler(new Illuminate\Cookie\CookieJar(), 60)));
         $this->assertTrue($session->handlerNeedsRequest());
         $session->getHandler()->shouldReceive('setRequest')->once();
-        $request = new \Symfony\Component\HttpFoundation\Request();
+        $request = new Symfony\Component\HttpFoundation\Request();
         $session->setRequestOnHandler($request);
     }
 

@@ -65,6 +65,8 @@ class MySqlGrammar extends Grammar
 
         if (isset($blueprint->engine)) {
             $sql .= ' engine = '.$blueprint->engine;
+        } elseif (! is_null($engine = $connection->getConfig('engine'))) {
+            $sql .= ' engine = '.$engine;
         }
 
         return $sql;
@@ -163,7 +165,11 @@ class MySqlGrammar extends Grammar
 
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} add {$type} {$command->index}($columns)";
+        $index = $this->wrap($command->index);
+
+        $algorithm = $command->algorithm ? ' using '.$command->algorithm : '';
+
+        return "alter table {$table} add {$type} {$index}{$algorithm}($columns)";
     }
 
     /**
@@ -229,7 +235,9 @@ class MySqlGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} drop index {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "alter table {$table} drop index {$index}";
     }
 
     /**
@@ -243,7 +251,9 @@ class MySqlGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} drop index {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "alter table {$table} drop index {$index}";
     }
 
     /**
@@ -257,7 +267,9 @@ class MySqlGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} drop foreign key {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "alter table {$table} drop foreign key {$index}";
     }
 
     /**
@@ -451,7 +463,7 @@ class MySqlGrammar extends Grammar
      */
     protected function typeJson(Fluent $column)
     {
-        return 'text';
+        return 'json';
     }
 
     /**
@@ -462,7 +474,7 @@ class MySqlGrammar extends Grammar
      */
     protected function typeJsonb(Fluent $column)
     {
-        return 'text';
+        return 'json';
     }
 
     /**
@@ -528,8 +540,8 @@ class MySqlGrammar extends Grammar
      */
     protected function typeTimestamp(Fluent $column)
     {
-        if (! $column->nullable && $column->default === null) {
-            return 'timestamp default 0';
+        if ($column->useCurrent) {
+            return 'timestamp default CURRENT_TIMESTAMP';
         }
 
         return 'timestamp';
@@ -543,8 +555,8 @@ class MySqlGrammar extends Grammar
      */
     protected function typeTimestampTz(Fluent $column)
     {
-        if (! $column->nullable && $column->default === null) {
-            return 'timestamp default 0';
+        if ($column->useCurrent) {
+            return 'timestamp default CURRENT_TIMESTAMP';
         }
 
         return 'timestamp';

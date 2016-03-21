@@ -76,7 +76,11 @@ class VerifyCsrfToken
     protected function shouldPassThrough($request)
     {
         foreach ($this->except as $except) {
-            if ($request->is(trim($except, '/'))) {
+            if ($except !== '/') {
+                $except = trim($except, '/');
+            }
+
+            if ($request->is($except)) {
                 return true;
             }
         }
@@ -102,13 +106,19 @@ class VerifyCsrfToken
      */
     protected function tokensMatch($request)
     {
+        $sessionToken = $request->session()->token();
+
         $token = $request->input('_token') ?: $request->header('X-CSRF-TOKEN');
 
         if (! $token && $header = $request->header('X-XSRF-TOKEN')) {
             $token = $this->encrypter->decrypt($header);
         }
 
-        return hash_equals((string) $request->session()->token(), (string) $token);
+        if (! is_string($sessionToken) || ! is_string($token)) {
+            return false;
+        }
+
+        return hash_equals($sessionToken, $token);
     }
 
     /**
@@ -125,7 +135,7 @@ class VerifyCsrfToken
         $response->headers->setCookie(
             new Cookie(
                 'XSRF-TOKEN', $request->session()->token(), time() + 60 * 120,
-                $config['path'], $config['domain'], false, false
+                $config['path'], $config['domain'], $config['secure'], false
             )
         );
 

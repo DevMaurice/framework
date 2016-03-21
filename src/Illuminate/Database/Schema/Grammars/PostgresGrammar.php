@@ -101,9 +101,11 @@ class PostgresGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
+        $index = $this->wrap($command->index);
+
         $columns = $this->columnize($command->columns);
 
-        return "alter table $table add constraint {$command->index} unique ($columns)";
+        return "alter table $table add constraint {$index} unique ($columns)";
     }
 
     /**
@@ -117,7 +119,11 @@ class PostgresGrammar extends Grammar
     {
         $columns = $this->columnize($command->columns);
 
-        return "create index {$command->index} on ".$this->wrapTable($blueprint)." ({$columns})";
+        $index = $this->wrap($command->index);
+
+        $algorithm = $command->algorithm ? ' using '.$command->algorithm : '';
+
+        return "create index {$index} on ".$this->wrapTable($blueprint).$algorithm." ({$columns})";
     }
 
     /**
@@ -171,7 +177,9 @@ class PostgresGrammar extends Grammar
     {
         $table = $blueprint->getTable();
 
-        return 'alter table '.$this->wrapTable($blueprint)." drop constraint {$table}_pkey";
+        $index = $this->wrap("{$table}_pkey");
+
+        return 'alter table '.$this->wrapTable($blueprint)." drop constraint {$index}";
     }
 
     /**
@@ -185,7 +193,9 @@ class PostgresGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} drop constraint {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "alter table {$table} drop constraint {$index}";
     }
 
     /**
@@ -197,7 +207,9 @@ class PostgresGrammar extends Grammar
      */
     public function compileDropIndex(Blueprint $blueprint, Fluent $command)
     {
-        return "drop index {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "drop index {$index}";
     }
 
     /**
@@ -211,7 +223,9 @@ class PostgresGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "alter table {$table} drop constraint {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "alter table {$table} drop constraint {$index}";
     }
 
     /**
@@ -390,7 +404,9 @@ class PostgresGrammar extends Grammar
      */
     protected function typeEnum(Fluent $column)
     {
-        $allowed = array_map(function ($a) { return "'".$a."'"; }, $column->allowed);
+        $allowed = array_map(function ($a) {
+            return "'".$a."'";
+        }, $column->allowed);
 
         return "varchar(255) check (\"{$column->name}\" in (".implode(', ', $allowed).'))';
     }
@@ -480,6 +496,10 @@ class PostgresGrammar extends Grammar
      */
     protected function typeTimestamp(Fluent $column)
     {
+        if ($column->useCurrent) {
+            return 'timestamp(0) without time zone default CURRENT_TIMESTAMP(0)';
+        }
+
         return 'timestamp(0) without time zone';
     }
 
@@ -491,6 +511,10 @@ class PostgresGrammar extends Grammar
      */
     protected function typeTimestampTz(Fluent $column)
     {
+        if ($column->useCurrent) {
+            return 'timestamp(0) with time zone default CURRENT_TIMESTAMP(0)';
+        }
+
         return 'timestamp(0) with time zone';
     }
 

@@ -3,6 +3,7 @@
 namespace Illuminate\Translation;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Illuminate\Support\NamespacedItemResolver;
 use Symfony\Component\Translation\MessageSelector;
@@ -39,6 +40,13 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
     protected $loaded = [];
 
     /**
+     * The message selector.
+     *
+     * @var \Symfony\Component\Translation\MessageSelector
+     */
+    protected $selector;
+
+    /**
      * Create a new translator instance.
      *
      * @param  \Illuminate\Translation\LoaderInterface  $loader
@@ -55,7 +63,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      * Determine if a translation exists for a given locale.
      *
      * @param  string  $key
-     * @param  string  $locale
+     * @param  string|null  $locale
      * @return bool
      */
     public function hasForLocale($key, $locale = null)
@@ -67,7 +75,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      * Determine if a translation exists.
      *
      * @param  string  $key
-     * @param  string  $locale
+     * @param  string|null  $locale
      * @param  bool  $fallback
      * @return bool
      */
@@ -81,9 +89,9 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      *
      * @param  string  $key
      * @param  array   $replace
-     * @param  string  $locale
+     * @param  string|null  $locale
      * @param  bool  $fallback
-     * @return string
+     * @return string|array|null
      */
     public function get($key, array $replace = [], $locale = null, $fallback = true)
     {
@@ -92,7 +100,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
         // Here we will get the locale that should be used for the language line. If one
         // was not passed, we will use the default locales which was given to us when
         // the translator was instantiated. Then, we can load the lines and return.
-        $locales = $fallback ? $this->parseLocale($locale) : [$locale];
+        $locales = $fallback ? $this->parseLocale($locale) : [$locale ?: $this->locale];
 
         foreach ($locales as $locale) {
             $this->load($namespace, $group, $locale);
@@ -149,7 +157,11 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
         $replace = $this->sortReplacements($replace);
 
         foreach ($replace as $key => $value) {
-            $line = str_replace(':'.$key, $value, $line);
+            $line = str_replace(
+                [':'.Str::upper($key), ':'.Str::ucfirst($key), ':'.$key],
+                [Str::upper($value), Str::ucfirst($value), $value],
+                $line
+            );
         }
 
         return $line;
@@ -172,7 +184,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      * Get a translation according to an integer value.
      *
      * @param  string  $key
-     * @param  int     $number
+     * @param  int|array|\Countable  $number
      * @param  array   $replace
      * @param  string  $locale
      * @return string
@@ -180,6 +192,10 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
     public function choice($key, $number, array $replace = [], $locale = null)
     {
         $line = $this->get($key, $replace, $locale = $locale ?: $this->locale ?: $this->fallback);
+
+        if (is_array($number) || $number instanceof \Countable) {
+            $number = count($number);
+        }
 
         $replace['count'] = $number;
 
@@ -193,7 +209,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      * @param  array   $parameters
      * @param  string  $domain
      * @param  string  $locale
-     * @return string
+     * @return string|array|null
      */
     public function trans($id, array $parameters = [], $domain = 'messages', $locale = null)
     {
@@ -204,7 +220,7 @@ class Translator extends NamespacedItemResolver implements TranslatorInterface
      * Get a translation according to an integer value.
      *
      * @param  string  $id
-     * @param  int     $number
+     * @param  int|array|\Countable  $number
      * @param  array   $parameters
      * @param  string  $domain
      * @param  string  $locale

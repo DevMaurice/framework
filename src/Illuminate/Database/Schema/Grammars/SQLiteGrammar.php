@@ -170,7 +170,9 @@ class SQLiteGrammar extends Grammar
 
         $table = $this->wrapTable($blueprint);
 
-        return "create unique index {$command->index} on {$table} ({$columns})";
+        $index = $this->wrap($command->index);
+
+        return "create unique index {$index} on {$table} ({$columns})";
     }
 
     /**
@@ -186,7 +188,9 @@ class SQLiteGrammar extends Grammar
 
         $table = $this->wrapTable($blueprint);
 
-        return "create index {$command->index} on {$table} ({$columns})";
+        $index = $this->wrap($command->index);
+
+        return "create index {$index} on {$table} ({$columns})";
     }
 
     /**
@@ -257,7 +261,9 @@ class SQLiteGrammar extends Grammar
      */
     public function compileDropUnique(Blueprint $blueprint, Fluent $command)
     {
-        return "drop index {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "drop index {$index}";
     }
 
     /**
@@ -269,7 +275,9 @@ class SQLiteGrammar extends Grammar
      */
     public function compileDropIndex(Blueprint $blueprint, Fluent $command)
     {
-        return "drop index {$command->index}";
+        $index = $this->wrap($command->index);
+
+        return "drop index {$index}";
     }
 
     /**
@@ -437,7 +445,7 @@ class SQLiteGrammar extends Grammar
      */
     protected function typeBoolean(Fluent $column)
     {
-        return 'tinyint';
+        return 'tinyint(1)';
     }
 
     /**
@@ -539,6 +547,10 @@ class SQLiteGrammar extends Grammar
      */
     protected function typeTimestamp(Fluent $column)
     {
+        if ($column->useCurrent) {
+            return 'datetime default CURRENT_TIMESTAMP';
+        }
+
         return 'datetime';
     }
 
@@ -550,6 +562,10 @@ class SQLiteGrammar extends Grammar
      */
     protected function typeTimestampTz(Fluent $column)
     {
+        if ($column->useCurrent) {
+            return 'datetime default CURRENT_TIMESTAMP';
+        }
+
         return 'datetime';
     }
 

@@ -54,8 +54,11 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         // ensure password attribute was not set to null
         $this->assertArrayNotHasKey('password', $attributes);
         $this->assertEquals('******', $model->password);
-        $this->assertEquals('5ebe2294ecd0e0f08eab7690d2a6ee69', $attributes['password_hash']);
-        $this->assertEquals('5ebe2294ecd0e0f08eab7690d2a6ee69', $model->password_hash);
+
+        $hash = 'e5e9fa1ba31ecd1ae84f75caaa474f3a663f05f4';
+
+        $this->assertEquals($hash, $attributes['password_hash']);
+        $this->assertEquals($hash, $model->password_hash);
     }
 
     public function testNewInstanceReturnsNewInstanceWithAttributesSet()
@@ -322,12 +325,22 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('2015-04-17 22:59:01', $model->fromDateTime($value));
 
         $value = new DateTime('2015-04-17 22:59:01');
+        $this->assertInstanceOf(DateTime::class, $value);
+        $this->assertInstanceOf(DateTimeInterface::class, $value);
+        $this->assertEquals('2015-04-17 22:59:01', $model->fromDateTime($value));
+
+        $value = new DateTimeImmutable('2015-04-17 22:59:01');
+        $this->assertInstanceOf(DateTimeImmutable::class, $value);
+        $this->assertInstanceOf(DateTimeInterface::class, $value);
         $this->assertEquals('2015-04-17 22:59:01', $model->fromDateTime($value));
 
         $value = '2015-04-17 22:59:01';
         $this->assertEquals('2015-04-17 22:59:01', $model->fromDateTime($value));
 
         $value = '2015-04-17';
+        $this->assertEquals('2015-04-17 00:00:00', $model->fromDateTime($value));
+
+        $value = '2015-4-17';
         $this->assertEquals('2015-04-17 00:00:00', $model->fromDateTime($value));
 
         $value = '1429311541';
@@ -513,7 +526,7 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         $this->assertEquals(1, $model->id);
         $this->assertTrue($model->exists);
         $this->assertEquals(2, count($model->relationMany));
-        $this->assertEquals([2, 3], $model->relationMany->lists('id')->all());
+        $this->assertEquals([2, 3], $model->relationMany->pluck('id')->all());
     }
 
     public function testNewQueryReturnsEloquentQueryBuilder()
@@ -549,9 +562,14 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
     public function testConnectionManagement()
     {
         EloquentModelStub::setConnectionResolver($resolver = m::mock('Illuminate\Database\ConnectionResolverInterface'));
-        $model = new EloquentModelStub;
-        $model->setConnection('foo');
-        $resolver->shouldReceive('connection')->once()->with('foo')->andReturn('bar');
+        $model = m::mock('EloquentModelStub[getConnectionName,connection]');
+
+        $retval = $model->setConnection('foo');
+        $this->assertEquals($retval, $model);
+        $this->assertEquals('foo', $model->connection);
+
+        $model->shouldReceive('getConnectionName')->once()->andReturn('somethingElse');
+        $resolver->shouldReceive('connection')->once()->with('somethingElse')->andReturn('bar');
 
         $this->assertEquals('bar', $model->getConnection());
     }
@@ -695,7 +713,7 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
     {
         $model = new EloquentModelStub(['name' => 'foo', 'age' => 'bar', 'id' => 'baz']);
         $model->setHidden(['age', 'id']);
-        $model->withHidden('age');
+        $model->makeVisible('age');
         $array = $model->toArray();
         $this->assertArrayHasKey('name', $array);
         $this->assertArrayHasKey('age', $array);
@@ -903,10 +921,11 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
 
     public function testModelsAssumeTheirName()
     {
+        require_once __DIR__.'/stubs/EloquentModelNamespacedStub.php';
+
         $model = new EloquentModelWithoutTableStub;
         $this->assertEquals('eloquent_model_without_table_stubs', $model->getTable());
 
-        require_once __DIR__.'/stubs/EloquentModelNamespacedStub.php';
         $namespacedModel = new Foo\Bar\EloquentModelNamespacedStub;
         $this->assertEquals('eloquent_model_namespaced_stubs', $namespacedModel->getTable());
     }
@@ -926,7 +945,7 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
 
     public function testRouteKeyIsPrimaryKey()
     {
-        $model = new EloquentModelStub;
+        $model = new EloquentModelNonIncrementingStub;
         $model->id = 'foo';
         $this->assertEquals('foo', $model->getRouteKey());
     }
@@ -1064,6 +1083,18 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         $this->assertEquals([], $model->toArray());
     }
 
+    public function testGetMutatedAttributes()
+    {
+        $model = new EloquentModelGetMutatorsStub;
+
+        $this->assertEquals(['first_name', 'middle_name', 'last_name'], $model->getMutatedAttributes());
+
+        EloquentModelGetMutatorsStub::resetMutatorCache();
+
+        EloquentModelGetMutatorsStub::$snakeAttributes = false;
+        $this->assertEquals(['firstName', 'middleName', 'lastName'], $model->getMutatedAttributes());
+    }
+
     public function testReplicateCreatesANewModelInstanceWithSameAttributeValues()
     {
         $model = new EloquentModelStub;
@@ -1129,128 +1160,123 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         $model->touchOwners();
     }
 
-    public function testTimestampsAreNotUpdatedWithTimestampsFalseSaveOption()
-    {
-        $model = m::mock('EloquentModelStub[newQueryWithoutScopes]');
-        $query = m::mock('Illuminate\Database\Eloquent\Builder');
-        $query->shouldReceive('where')->once()->with('id', '=', 1);
-        $query->shouldReceive('update')->once()->with(['name' => 'taylor'])->andReturn(1);
-        $model->shouldReceive('newQueryWithoutScopes')->once()->andReturn($query);
-
-        $model->id = 1;
-        $model->syncOriginal();
-        $model->name = 'taylor';
-        $model->exists = true;
-        $this->assertTrue($model->save(['timestamps' => false]));
-        $this->assertNull($model->updated_at);
-    }
-
     public function testModelAttributesAreCastedWhenPresentInCastsArray()
     {
         $model = new EloquentModelCastingStub;
         $model->setDateFormat('Y-m-d H:i:s');
-        $model->first = '3';
-        $model->second = '4.0';
-        $model->third = 2.5;
-        $model->fourth = 1;
-        $model->fifth = 0;
-        $model->sixth = ['foo' => 'bar'];
+        $model->intAttribute = '3';
+        $model->floatAttribute = '4.0';
+        $model->stringAttribute = 2.5;
+        $model->boolAttribute = 1;
+        $model->booleanAttribute = 0;
+        $model->objectAttribute = ['foo' => 'bar'];
         $obj = new StdClass;
         $obj->foo = 'bar';
-        $model->seventh = $obj;
-        $model->eighth = ['foo' => 'bar'];
-        $model->ninth = '1969-07-20';
-        $model->tenth = '1969-07-20 22:56:00';
+        $model->arrayAttribute = $obj;
+        $model->jsonAttribute = ['foo' => 'bar'];
+        $model->dateAttribute = '1969-07-20';
+        $model->datetimeAttribute = '1969-07-20 22:56:00';
+        $model->timestampAttribute = '1969-07-20 22:56:00';
 
-        $this->assertInternalType('int', $model->first);
-        $this->assertInternalType('float', $model->second);
-        $this->assertInternalType('string', $model->third);
-        $this->assertInternalType('boolean', $model->fourth);
-        $this->assertInternalType('boolean', $model->fifth);
-        $this->assertInternalType('object', $model->sixth);
-        $this->assertInternalType('array', $model->seventh);
-        $this->assertInternalType('array', $model->eighth);
-        $this->assertTrue($model->fourth);
-        $this->assertFalse($model->fifth);
-        $this->assertEquals($obj, $model->sixth);
-        $this->assertEquals(['foo' => 'bar'], $model->seventh);
-        $this->assertEquals(['foo' => 'bar'], $model->eighth);
-        $this->assertEquals('{"foo":"bar"}', $model->eighthAttributeValue());
-        $this->assertInstanceOf('Carbon\Carbon', $model->ninth);
-        $this->assertInstanceOf('Carbon\Carbon', $model->tenth);
-        $this->assertEquals('1969-07-20', $model->ninth->toDateString());
-        $this->assertEquals('1969-07-20 22:56:00', $model->tenth->toDateTimeString());
+        $this->assertInternalType('int', $model->intAttribute);
+        $this->assertInternalType('float', $model->floatAttribute);
+        $this->assertInternalType('string', $model->stringAttribute);
+        $this->assertInternalType('boolean', $model->boolAttribute);
+        $this->assertInternalType('boolean', $model->booleanAttribute);
+        $this->assertInternalType('object', $model->objectAttribute);
+        $this->assertInternalType('array', $model->arrayAttribute);
+        $this->assertInternalType('array', $model->jsonAttribute);
+        $this->assertTrue($model->boolAttribute);
+        $this->assertFalse($model->booleanAttribute);
+        $this->assertEquals($obj, $model->objectAttribute);
+        $this->assertEquals(['foo' => 'bar'], $model->arrayAttribute);
+        $this->assertEquals(['foo' => 'bar'], $model->jsonAttribute);
+        $this->assertEquals('{"foo":"bar"}', $model->jsonAttributeValue());
+        $this->assertInstanceOf('Carbon\Carbon', $model->dateAttribute);
+        $this->assertInstanceOf('Carbon\Carbon', $model->datetimeAttribute);
+        $this->assertEquals('1969-07-20', $model->dateAttribute->toDateString());
+        $this->assertEquals('1969-07-20 22:56:00', $model->datetimeAttribute->toDateTimeString());
+        $this->assertEquals(-14173440, $model->timestampAttribute);
 
         $arr = $model->toArray();
-        $this->assertInternalType('int', $arr['first']);
-        $this->assertInternalType('float', $arr['second']);
-        $this->assertInternalType('string', $arr['third']);
-        $this->assertInternalType('boolean', $arr['fourth']);
-        $this->assertInternalType('boolean', $arr['fifth']);
-        $this->assertInternalType('object', $arr['sixth']);
-        $this->assertInternalType('array', $arr['seventh']);
-        $this->assertInternalType('array', $arr['eighth']);
-        $this->assertTrue($arr['fourth']);
-        $this->assertFalse($arr['fifth']);
-        $this->assertEquals($obj, $arr['sixth']);
-        $this->assertEquals(['foo' => 'bar'], $arr['seventh']);
-        $this->assertEquals(['foo' => 'bar'], $arr['eighth']);
-        $this->assertInstanceOf('Carbon\Carbon', $arr['ninth']);
-        $this->assertInstanceOf('Carbon\Carbon', $arr['tenth']);
-        $this->assertEquals('1969-07-20', $arr['ninth']->toDateString());
-        $this->assertEquals('1969-07-20 22:56:00', $arr['tenth']->toDateTimeString());
+        $this->assertInternalType('int', $arr['intAttribute']);
+        $this->assertInternalType('float', $arr['floatAttribute']);
+        $this->assertInternalType('string', $arr['stringAttribute']);
+        $this->assertInternalType('boolean', $arr['boolAttribute']);
+        $this->assertInternalType('boolean', $arr['booleanAttribute']);
+        $this->assertInternalType('object', $arr['objectAttribute']);
+        $this->assertInternalType('array', $arr['arrayAttribute']);
+        $this->assertInternalType('array', $arr['jsonAttribute']);
+        $this->assertTrue($arr['boolAttribute']);
+        $this->assertFalse($arr['booleanAttribute']);
+        $this->assertEquals($obj, $arr['objectAttribute']);
+        $this->assertEquals(['foo' => 'bar'], $arr['arrayAttribute']);
+        $this->assertEquals(['foo' => 'bar'], $arr['jsonAttribute']);
+        $this->assertEquals('1969-07-20 00:00:00', $arr['dateAttribute']);
+        $this->assertEquals('1969-07-20 22:56:00', $arr['datetimeAttribute']);
+        $this->assertEquals(-14173440, $arr['timestampAttribute']);
     }
 
     public function testModelAttributeCastingPreservesNull()
     {
         $model = new EloquentModelCastingStub;
-        $model->first = null;
-        $model->second = null;
-        $model->third = null;
-        $model->fourth = null;
-        $model->fifth = null;
-        $model->sixth = null;
-        $model->seventh = null;
-        $model->eighth = null;
-        $model->ninth = null;
-        $model->tenth = null;
+        $model->intAttribute = null;
+        $model->floatAttribute = null;
+        $model->stringAttribute = null;
+        $model->boolAttribute = null;
+        $model->booleanAttribute = null;
+        $model->objectAttribute = null;
+        $model->arrayAttribute = null;
+        $model->jsonAttribute = null;
+        $model->dateAttribute = null;
+        $model->datetimeAttribute = null;
+        $model->timestampAttribute = null;
 
         $attributes = $model->getAttributes();
 
-        $this->assertNull($attributes['first']);
-        $this->assertNull($attributes['second']);
-        $this->assertNull($attributes['third']);
-        $this->assertNull($attributes['fourth']);
-        $this->assertNull($attributes['fifth']);
-        $this->assertNull($attributes['sixth']);
-        $this->assertNull($attributes['seventh']);
-        $this->assertNull($attributes['eighth']);
-        $this->assertNull($attributes['ninth']);
-        $this->assertNull($attributes['tenth']);
+        $this->assertNull($attributes['intAttribute']);
+        $this->assertNull($attributes['floatAttribute']);
+        $this->assertNull($attributes['stringAttribute']);
+        $this->assertNull($attributes['boolAttribute']);
+        $this->assertNull($attributes['booleanAttribute']);
+        $this->assertNull($attributes['objectAttribute']);
+        $this->assertNull($attributes['arrayAttribute']);
+        $this->assertNull($attributes['jsonAttribute']);
+        $this->assertNull($attributes['dateAttribute']);
+        $this->assertNull($attributes['datetimeAttribute']);
+        $this->assertNull($attributes['timestampAttribute']);
 
-        $this->assertNull($model->first);
-        $this->assertNull($model->second);
-        $this->assertNull($model->third);
-        $this->assertNull($model->fourth);
-        $this->assertNull($model->fifth);
-        $this->assertNull($model->sixth);
-        $this->assertNull($model->seventh);
-        $this->assertNull($model->eighth);
-        $this->assertNull($model->ninth);
-        $this->assertNull($model->tenth);
+        $this->assertNull($model->intAttribute);
+        $this->assertNull($model->floatAttribute);
+        $this->assertNull($model->stringAttribute);
+        $this->assertNull($model->boolAttribute);
+        $this->assertNull($model->booleanAttribute);
+        $this->assertNull($model->objectAttribute);
+        $this->assertNull($model->arrayAttribute);
+        $this->assertNull($model->jsonAttribute);
+        $this->assertNull($model->dateAttribute);
+        $this->assertNull($model->datetimeAttribute);
+        $this->assertNull($model->timestampAttribute);
 
         $array = $model->toArray();
 
-        $this->assertNull($array['first']);
-        $this->assertNull($array['second']);
-        $this->assertNull($array['third']);
-        $this->assertNull($array['fourth']);
-        $this->assertNull($array['fifth']);
-        $this->assertNull($array['sixth']);
-        $this->assertNull($array['seventh']);
-        $this->assertNull($array['eighth']);
-        $this->assertNull($array['ninth']);
-        $this->assertNull($array['tenth']);
+        $this->assertNull($array['intAttribute']);
+        $this->assertNull($array['floatAttribute']);
+        $this->assertNull($array['stringAttribute']);
+        $this->assertNull($array['boolAttribute']);
+        $this->assertNull($array['booleanAttribute']);
+        $this->assertNull($array['objectAttribute']);
+        $this->assertNull($array['arrayAttribute']);
+        $this->assertNull($array['jsonAttribute']);
+        $this->assertNull($array['dateAttribute']);
+        $this->assertNull($array['datetimeAttribute']);
+        $this->assertNull($array['timestampAttribute']);
+    }
+
+    public function testUpdatingNonExistentModelFails()
+    {
+        $model = new EloquentModelStub;
+        $this->assertFalse($model->update());
     }
 
     protected function addMockConnection($model)
@@ -1275,6 +1301,7 @@ class EloquentTestObserverStub
 
 class EloquentModelStub extends Model
 {
+    public $connection;
     protected $table = 'stub';
     protected $guarded = [];
     protected $morph_to_stub_type = 'EloquentModelSaveStub';
@@ -1296,7 +1323,7 @@ class EloquentModelStub extends Model
 
     public function setPasswordAttribute($value)
     {
-        $this->attributes['password_hash'] = md5($value);
+        $this->attributes['password_hash'] = sha1($value);
     }
 
     public function publicIncrement($column, $amount = 1)
@@ -1364,17 +1391,6 @@ class EloquentModelSaveStub extends Model
     }
 }
 
-class EloquentModelFindStub extends Model
-{
-    public function newQuery()
-    {
-        $mock = m::mock('Illuminate\Database\Eloquent\Builder');
-        $mock->shouldReceive('find')->once()->with(1, ['*'])->andReturn('foo');
-
-        return $mock;
-    }
-}
-
 class EloquentModelFindWithWritePdoStub extends Model
 {
     public function newQuery()
@@ -1416,17 +1432,6 @@ class EloquentModelHydrateRawStub extends Model
     }
 }
 
-class EloquentModelFindManyStub extends Model
-{
-    public function newQuery()
-    {
-        $mock = m::mock('Illuminate\Database\Eloquent\Builder');
-        $mock->shouldReceive('find')->once()->with([1, 2], ['*'])->andReturn('foo');
-
-        return $mock;
-    }
-}
-
 class EloquentModelWithStub extends Model
 {
     public function newQuery()
@@ -1446,12 +1451,12 @@ class EloquentModelBootingTestStub extends Model
 {
     public static function unboot()
     {
-        unset(static::$booted[get_called_class()]);
+        unset(static::$booted[static::class]);
     }
 
     public static function isBooted()
     {
-        return array_key_exists(get_called_class(), static::$booted);
+        return array_key_exists(static::class, static::$booted);
     }
 }
 
@@ -1475,24 +1480,61 @@ class EloquentModelAppendsStub extends Model
     }
 }
 
+class EloquentModelGetMutatorsStub extends Model
+{
+    public static function resetMutatorCache()
+    {
+        static::$mutatorCache = [];
+    }
+
+    public function getFirstNameAttribute()
+    {
+    }
+
+    public function getMiddleNameAttribute()
+    {
+    }
+
+    public function getLastNameAttribute()
+    {
+    }
+
+    public function doNotgetFirstInvalidAttribute()
+    {
+    }
+
+    public function doNotGetSecondInvalidAttribute()
+    {
+    }
+
+    public function doNotgetThirdInvalidAttributeEither()
+    {
+    }
+
+    public function doNotGetFourthInvalidAttributeEither()
+    {
+    }
+}
+
 class EloquentModelCastingStub extends Model
 {
     protected $casts = [
-        'first' => 'int',
-        'second' => 'float',
-        'third' => 'string',
-        'fourth' => 'bool',
-        'fifth' => 'boolean',
-        'sixth' => 'object',
-        'seventh' => 'array',
-        'eighth' => 'json',
-        'ninth' => 'date',
-        'tenth' => 'datetime',
+        'intAttribute' => 'int',
+        'floatAttribute' => 'float',
+        'stringAttribute' => 'string',
+        'boolAttribute' => 'bool',
+        'booleanAttribute' => 'boolean',
+        'objectAttribute' => 'object',
+        'arrayAttribute' => 'array',
+        'jsonAttribute' => 'json',
+        'dateAttribute' => 'date',
+        'datetimeAttribute' => 'datetime',
+        'timestampAttribute' => 'timestamp',
     ];
 
-    public function eighthAttributeValue()
+    public function jsonAttributeValue()
     {
-        return $this->attributes['eighth'];
+        return $this->attributes['jsonAttribute'];
     }
 }
 
@@ -1516,4 +1558,11 @@ class EloquentModelDynamicVisibleStub extends Illuminate\Database\Eloquent\Model
     {
         return ['name', 'id'];
     }
+}
+
+class EloquentModelNonIncrementingStub extends Illuminate\Database\Eloquent\Model
+{
+    protected $table = 'stub';
+    protected $guarded = [];
+    public $incrementing = false;
 }

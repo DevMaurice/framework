@@ -17,7 +17,6 @@ use Illuminate\Routing\Matching\MethodValidator;
 use Illuminate\Routing\Matching\SchemeValidator;
 use Symfony\Component\Routing\Route as SymfonyRoute;
 use Illuminate\Http\Exception\HttpResponseException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class Route
 {
@@ -80,6 +79,13 @@ class Route
     protected $compiled;
 
     /**
+     * The router instance used by the route.
+     *
+     * @var \Illuminate\Routing\Router
+     */
+    protected $router;
+
+    /**
      * The container instance used by the route.
      *
      * @var \Illuminate\Container\Container
@@ -96,7 +102,7 @@ class Route
     /**
      * Create a new Route instance.
      *
-     * @param  array   $methods
+     * @param  array|string  $methods
      * @param  string  $uri
      * @param  \Closure|array  $action
      * @return void
@@ -129,10 +135,6 @@ class Route
         try {
             if (! is_string($this->action['uses'])) {
                 return $this->runCallable($request);
-            }
-
-            if ($this->customDispatcherIsBound()) {
-                return $this->runWithCustomDispatcher($request);
             }
 
             return $this->runController($request);
@@ -168,40 +170,8 @@ class Route
     {
         list($class, $method) = explode('@', $this->action['uses']);
 
-        $parameters = $this->resolveClassMethodDependencies(
-            $this->parametersWithoutNulls(), $class, $method
-        );
-
-        if (! method_exists($instance = $this->container->make($class), $method)) {
-            throw new NotFoundHttpException;
-        }
-
-        return call_user_func_array([$instance, $method], $parameters);
-    }
-
-    /**
-     * Determine if a custom route dispatcher is bound in the container.
-     *
-     * @return bool
-     */
-    protected function customDispatcherIsBound()
-    {
-        return $this->container->bound('illuminate.route.dispatcher');
-    }
-
-    /**
-     * Send the request and route to a custom dispatcher for handling.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return mixed
-     */
-    protected function runWithCustomDispatcher(Request $request)
-    {
-        list($class, $method) = explode('@', $this->action['uses']);
-
-        $dispatcher = $this->container->make('illuminate.route.dispatcher');
-
-        return $dispatcher->dispatch($this, $request, $class, $method);
+        return (new ControllerDispatcher($this->router, $this->container))
+                    ->dispatch($this, $request, $class, $method);
     }
 
     /**
@@ -239,7 +209,7 @@ class Route
 
         $uri = preg_replace('/\{(\w+?)\?\}/', '{$1}', $this->uri);
 
-        $this->compiled = with(
+        $this->compiled = (
             new SymfonyRoute($uri, $optionals, $this->wheres, [], $this->domain() ?: '')
         )->compile();
     }
@@ -260,7 +230,7 @@ class Route
      * Get or set the middlewares attached to the route.
      *
      * @param  array|string|null $middleware
-     * @return array
+     * @return $this|array
      */
     public function middleware($middleware = null)
     {
@@ -273,7 +243,7 @@ class Route
         }
 
         $this->action['middleware'] = array_merge(
-            Arr::get($this->action, 'middleware', []), $middleware
+            (array) Arr::get($this->action, 'middleware', []), $middleware
         );
 
         return $this;
@@ -302,6 +272,16 @@ class Route
     }
 
     /**
+     * Determine if the route has parameters.
+     *
+     * @return bool
+     */
+    public function hasParameters()
+    {
+        return isset($this->parameters);
+    }
+
+    /**
      * Determine a given parameter exists from the route.
      *
      * @param  string $name
@@ -309,6 +289,10 @@ class Route
      */
     public function hasParameter($name)
     {
+        if (! $this->hasParameters()) {
+            return false;
+        }
+
         return array_key_exists($name, $this->parameters());
     }
 
@@ -389,7 +373,9 @@ class Route
      */
     public function parametersWithoutNulls()
     {
-        return array_filter($this->parameters(), function ($p) { return ! is_null($p); });
+        return array_filter($this->parameters(), function ($p) {
+            return ! is_null($p);
+        });
     }
 
     /**
@@ -415,7 +401,9 @@ class Route
     {
         preg_match_all('/\{(.*?)\}/', $this->domain().$this->uri, $matches);
 
-        return array_map(function ($m) { return trim($m, '?'); }, $matches[1]);
+        return array_map(function ($m) {
+            return trim($m, '?');
+        }, $matches[1]);
     }
 
     /**
@@ -497,11 +485,11 @@ class Route
      */
     protected function matchToKeys(array $matches)
     {
-        if (count($this->parameterNames()) == 0) {
+        if (empty($parameterNames = $this->parameterNames())) {
             return [];
         }
 
-        $parameters = array_intersect_key($matches, array_flip($this->parameterNames()));
+        $parameters = array_intersect_key($matches, array_flip($parameterNames));
 
         return array_filter($parameters, function ($value) {
             return is_string($value) && strlen($value) > 0;
@@ -520,19 +508,34 @@ class Route
             $value = isset($value) ? $value : Arr::get($this->defaults, $key);
         }
 
+        foreach ($this->defaults as $key => $value) {
+            if (! isset($parameters[$key])) {
+                $parameters[$key] = $value;
+            }
+        }
+
         return $parameters;
     }
 
     /**
      * Parse the route action into a standard array.
      *
-     * @param  callable|array  $action
+     * @param  callable|array|null  $action
      * @return array
      *
      * @throws \UnexpectedValueException
      */
     protected function parseAction($action)
     {
+        // If no action is passed in right away, we assume the user will make use of
+        // fluent routing. In that case, we set a default closure, to be executed
+        // if the user never explicitly sets an action to handle the given uri.
+        if (is_null($action)) {
+            return ['uses' => function () {
+                throw new LogicException("Route for [{$this->uri}] has no action.");
+            }];
+        }
+
         // If the action is already a Closure instance, we will just set that instance
         // as the "uses" property, because there is nothing else we need to do when
         // it is available. Otherwise we will need to find it in the action list.
@@ -564,7 +567,7 @@ class Route
      */
     protected function findCallable(array $action)
     {
-        return Arr::first($action, function ($key, $value) {
+        return Arr::first($action, function ($value, $key) {
             return is_callable($value) && is_numeric($key);
         });
     }
@@ -755,7 +758,7 @@ class Route
      * Set the URI that the route responds to.
      *
      * @param  string  $uri
-     * @return \Illuminate\Routing\Route
+     * @return $this
      */
     public function setUri($uri)
     {
@@ -795,6 +798,17 @@ class Route
         $this->action['as'] = isset($this->action['as']) ? $this->action['as'].$name : $name;
 
         return $this;
+    }
+
+    /**
+     * Set the handler for the route.
+     *
+     * @param  \Closure|string  $action
+     * @return $this
+     */
+    public function uses($action)
+    {
+        return $this->setAction(array_merge($this->action, $this->parseAction($action)));
     }
 
     /**
@@ -841,6 +855,19 @@ class Route
     }
 
     /**
+     * Set the router instance on the route.
+     *
+     * @param  \Illuminate\Routing\Router  $router
+     * @return $this
+     */
+    public function setRouter(Router $router)
+    {
+        $this->router = $router;
+
+        return $this;
+    }
+
+    /**
      * Set the container instance on the route.
      *
      * @param  \Illuminate\Container\Container  $container
@@ -866,7 +893,7 @@ class Route
             throw new LogicException("Unable to prepare route [{$this->uri}] for serialization. Uses Closure.");
         }
 
-        unset($this->container, $this->compiled);
+        unset($this->router, $this->container, $this->compiled);
     }
 
     /**

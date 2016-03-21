@@ -26,6 +26,16 @@ class TranslationTranslatorTest extends PHPUnit_Framework_TestCase
         $t = $this->getMock('Illuminate\Translation\Translator', ['get'], [$this->getLoader(), 'en']);
         $t->expects($this->once())->method('get')->with($this->equalTo('foo'), $this->equalTo([]), $this->equalTo('bar'), false)->will($this->returnValue('foo'));
         $this->assertFalse($t->hasForLocale('foo', 'bar'));
+
+        $t = $this->getMock('Illuminate\Translation\Translator', ['load', 'getLine'], [$this->getLoader(), 'en']);
+        $t->expects($this->once())->method('load')->with($this->equalTo('*'), $this->equalTo('foo'), $this->equalTo('en'))->will($this->returnValue(null));
+        $t->expects($this->once())->method('getLine')->with($this->equalTo('*'), $this->equalTo('foo'), $this->equalTo('en'), null, $this->equalTo([]))->will($this->returnValue('bar'));
+        $this->assertTrue($t->hasForLocale('foo'));
+
+        $t = $this->getMock('Illuminate\Translation\Translator', ['load', 'getLine'], [$this->getLoader(), 'en']);
+        $t->expects($this->once())->method('load')->with($this->equalTo('*'), $this->equalTo('foo'), $this->equalTo('en'))->will($this->returnValue(null));
+        $t->expects($this->once())->method('getLine')->with($this->equalTo('*'), $this->equalTo('foo'), $this->equalTo('en'), null, $this->equalTo([]))->will($this->returnValue('foo'));
+        $this->assertFalse($t->hasForLocale('foo'));
     }
 
     public function testGetMethodProperlyLoadsAndRetrievesItem()
@@ -60,6 +70,20 @@ class TranslationTranslatorTest extends PHPUnit_Framework_TestCase
         $selector->shouldReceive('choose')->once()->with('line', 10, 'en')->andReturn('choiced');
 
         $t->choice('foo', 10, ['replace']);
+    }
+
+    public function testChoiceMethodProperlyCountsCollectionsAndLoadsAndRetrievesItem()
+    {
+        $t = $this->getMock('Illuminate\Translation\Translator', ['get'], [$this->getLoader(), 'en']);
+        $t->expects($this->exactly(2))->method('get')->with($this->equalTo('foo'), $this->equalTo(['replace']), $this->equalTo('en'))->will($this->returnValue('line'));
+        $t->setSelector($selector = m::mock('Symfony\Component\Translation\MessageSelector'));
+        $selector->shouldReceive('choose')->twice()->with('line', 3, 'en')->andReturn('choiced');
+
+        $values = ['foo', 'bar', 'baz'];
+        $t->choice('foo', $values, ['replace']);
+
+        $values = new Illuminate\Support\Collection(['foo', 'bar', 'baz']);
+        $t->choice('foo', $values, ['replace']);
     }
 
     protected function getLoader()
