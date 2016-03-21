@@ -124,6 +124,56 @@ class DatabaseEloquentSoftDeletesIntegrationTest extends PHPUnit_Framework_TestC
         $this->assertEquals(1, $users->first()->id);
     }
 
+    public function testFirstOrNew()
+    {
+        $this->createUsers();
+
+        $result = SoftDeletesTestUser::firstOrNew(['email' => 'taylorotwell@gmail.com']);
+        $this->assertNull($result->id);
+
+        $result = SoftDeletesTestUser::withTrashed()->firstOrNew(['email' => 'taylorotwell@gmail.com']);
+        $this->assertEquals(1, $result->id);
+    }
+
+    public function testFindOrNew()
+    {
+        $this->createUsers();
+
+        $result = SoftDeletesTestUser::findOrNew(1);
+        $this->assertNull($result->id);
+
+        $result = SoftDeletesTestUser::withTrashed()->findOrNew(1);
+        $this->assertEquals(1, $result->id);
+    }
+
+    public function testFirstOrCreate()
+    {
+        $this->createUsers();
+
+        $result = SoftDeletesTestUser::withTrashed()->firstOrCreate(['email' => 'taylorotwell@gmail.com']);
+        $this->assertEquals('taylorotwell@gmail.com', $result->email);
+        $this->assertCount(1, SoftDeletesTestUser::all());
+
+        $result = SoftDeletesTestUser::firstOrCreate(['email' => 'foo@bar.com']);
+        $this->assertEquals('foo@bar.com', $result->email);
+        $this->assertCount(2, SoftDeletesTestUser::all());
+        $this->assertCount(3, SoftDeletesTestUser::withTrashed()->get());
+    }
+
+    public function testUpdateOrCreate()
+    {
+        $this->createUsers();
+
+        $result = SoftDeletesTestUser::updateOrCreate(['email' => 'foo@bar.com'], ['email' => 'bar@baz.com']);
+        $this->assertEquals('bar@baz.com', $result->email);
+        $this->assertCount(2, SoftDeletesTestUser::all());
+
+        $result = SoftDeletesTestUser::withTrashed()->updateOrCreate(['email' => 'taylorotwell@gmail.com'], ['email' => 'foo@bar.com']);
+        $this->assertEquals('foo@bar.com', $result->email);
+        $this->assertCount(2, SoftDeletesTestUser::all());
+        $this->assertCount(3, SoftDeletesTestUser::withTrashed()->get());
+    }
+
     /**
      * Helpers...
      */

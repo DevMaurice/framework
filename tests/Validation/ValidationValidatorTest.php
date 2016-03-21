@@ -231,6 +231,37 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('require it please!', $v->messages()->first('name'));
     }
 
+    public function testSeveralSameInlineValidationMessagesAreRespected()
+    {
+        $trans = $this->getRealTranslator();
+
+        $data = [
+            'name' => '',
+            'foo' => 'bar',
+            'laravel' => 'framework',
+        ];
+
+        $rules = [
+            'name' => 'Required',
+            'foo' => 'Boolean',
+            'laravel' => 'Numeric',
+        ];
+
+        $messages = [
+            'name.required' => 'validation failed',
+            'foo.boolean' => 'validation failed',
+            'laravel.numeric' => 'another failure',
+        ];
+
+        $v = new Validator($trans, $data, $rules, $messages);
+        $this->assertFalse($v->passes());
+        $v->messages()->setFormat(':message');
+
+        $this->assertEquals('validation failed', $v->messages()->first('name'));
+        $this->assertEquals('validation failed', $v->messages()->first('foo'));
+        $this->assertEquals('another failure', $v->messages()->first('laravel'));
+    }
+
     public function testValidateRequired()
     {
         $trans = $this->getRealTranslator();
@@ -1067,6 +1098,9 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
 
         $v = new Validator($trans, ['x' => 'http://www.google.com'], ['x' => 'active_url']);
         $this->assertTrue($v->passes());
+
+        $v = new Validator($trans, ['x' => 'http://www.google.com/about'], ['x' => 'active_url']);
+        $this->assertTrue($v->passes());
     }
 
     public function testValidateImage()
@@ -1213,10 +1247,10 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $v = new Validator($trans, ['x' => 'http://g232oogle.com'], ['x' => 'AlphaNum']);
         $this->assertFalse($v->passes());
 
-        $v = new Validator($trans, ['x' => '१२३'], ['x' => 'AlphaNum']);//numbers in Hindi
+        $v = new Validator($trans, ['x' => '१२३'], ['x' => 'AlphaNum']); // numbers in Hindi
         $this->assertTrue($v->passes());
 
-        $v = new Validator($trans, ['x' => '٧٨٩'], ['x' => 'AlphaNum']);//eastern arabic numerals
+        $v = new Validator($trans, ['x' => '٧٨٩'], ['x' => 'AlphaNum']); // eastern arabic numerals
         $this->assertTrue($v->passes());
 
         $v = new Validator($trans, ['x' => 'नमस्कार'], ['x' => 'AlphaNum']);
@@ -1235,7 +1269,7 @@ class ValidationValidatorTest extends PHPUnit_Framework_TestCase
         $v = new Validator($trans, ['x' => 'नमस्कार-_'], ['x' => 'AlphaDash']);
         $this->assertTrue($v->passes());
 
-        $v = new Validator($trans, ['x' => '٧٨٩'], ['x' => 'AlphaDash']);//eastern arabic numerals
+        $v = new Validator($trans, ['x' => '٧٨٩'], ['x' => 'AlphaDash']); // eastern arabic numerals
         $this->assertTrue($v->passes());
     }
 

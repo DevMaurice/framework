@@ -196,6 +196,16 @@ class RoutingRouteTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('bar', $route->parameter('foo', 'bar'));
     }
 
+    public function testRouteParametersDefaultValue()
+    {
+        $router = $this->getRouter();
+        $router->get('foo/{bar?}', ['uses' => 'RouteTestControllerWithParameterStub@returnParameter'])->defaults('bar', 'foo');
+        $this->assertEquals('foo', $router->dispatch(Request::create('foo', 'GET'))->getContent());
+
+        $router->get('foo/{bar?}', function ($bar = '') { return $bar; })->defaults('bar', 'foo');
+        $this->assertEquals('foo', $router->dispatch(Request::create('foo', 'GET'))->getContent());
+    }
+
     /**
      * @expectedException Symfony\Component\HttpKernel\Exception\NotFoundHttpException
      */
@@ -255,7 +265,7 @@ class RoutingRouteTest extends PHPUnit_Framework_TestCase
 
         $router = $this->getRouter();
         $router->get('foo/bar', ['before' => 'foo:bar,baz|bar:boom', function () { return 'hello'; }]);
-        $router->filter('foo', function ($route, $request, $bar, $baz) { return; });
+        $router->filter('foo', function ($route, $request, $bar, $baz) {});
         $router->filter('bar', function ($route, $request, $boom) { return $boom; });
         $this->assertEquals('boom', $router->dispatch(Request::create('foo/bar', 'GET'))->getContent());
 
@@ -682,6 +692,20 @@ return 'foo!'; });
         $this->assertEquals('foo/bar/baz', $route->getPath());
     }
 
+    public function testRouteMiddlewareMergeWithMiddlewareAttributesAsStrings()
+    {
+        $router = $this->getRouter();
+        $router->group(['prefix' => 'foo', 'middleware' => 'boo:foo'], function () use ($router) {
+            $router->get('bar', function () { return 'hello'; })->middleware('baz:gaz');
+        });
+        $routes = $router->getRoutes()->getRoutes();
+        $route = $routes[0];
+        $this->assertEquals(
+            ['boo:foo', 'baz:gaz'],
+            $route->middleware()
+        );
+    }
+
     public function testRoutePrefixing()
     {
         /*
@@ -935,6 +959,14 @@ class RouteTestControllerStub extends Illuminate\Routing\Controller
     public function index()
     {
         return 'Hello World';
+    }
+}
+
+class RouteTestControllerWithParameterStub extends Illuminate\Routing\Controller
+{
+    public function returnParameter($bar = '')
+    {
+        return $bar;
     }
 }
 

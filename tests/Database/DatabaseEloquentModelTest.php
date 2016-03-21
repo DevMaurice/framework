@@ -903,10 +903,11 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
 
     public function testModelsAssumeTheirName()
     {
+        require_once __DIR__.'/stubs/EloquentModelNamespacedStub.php';
+
         $model = new EloquentModelWithoutTableStub;
         $this->assertEquals('eloquent_model_without_table_stubs', $model->getTable());
 
-        require_once __DIR__.'/stubs/EloquentModelNamespacedStub.php';
         $namespacedModel = new Foo\Bar\EloquentModelNamespacedStub;
         $this->assertEquals('eloquent_model_namespaced_stubs', $namespacedModel->getTable());
     }
@@ -1062,6 +1063,18 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
 
         $model->setVisible([]);
         $this->assertEquals([], $model->toArray());
+    }
+
+    public function testGetMutatedAttributes()
+    {
+        $model = new EloquentModelGetMutatorsStub;
+
+        $this->assertEquals(['first_name', 'middle_name', 'last_name'], $model->getMutatedAttributes());
+
+        EloquentModelGetMutatorsStub::resetMutatorCache();
+
+        EloquentModelGetMutatorsStub::$snakeAttributes = false;
+        $this->assertEquals(['firstName', 'middleName', 'lastName'], $model->getMutatedAttributes());
     }
 
     public function testReplicateCreatesANewModelInstanceWithSameAttributeValues()
@@ -1253,6 +1266,12 @@ class DatabaseEloquentModelTest extends PHPUnit_Framework_TestCase
         $this->assertNull($array['tenth']);
     }
 
+    public function testUpdatingNonExistentModelFails()
+    {
+        $model = new EloquentModelStub;
+        $this->assertFalse($model->update());
+    }
+
     protected function addMockConnection($model)
     {
         $model->setConnectionResolver($resolver = m::mock('Illuminate\Database\ConnectionResolverInterface'));
@@ -1364,17 +1383,6 @@ class EloquentModelSaveStub extends Model
     }
 }
 
-class EloquentModelFindStub extends Model
-{
-    public function newQuery()
-    {
-        $mock = m::mock('Illuminate\Database\Eloquent\Builder');
-        $mock->shouldReceive('find')->once()->with(1, ['*'])->andReturn('foo');
-
-        return $mock;
-    }
-}
-
 class EloquentModelFindWithWritePdoStub extends Model
 {
     public function newQuery()
@@ -1411,17 +1419,6 @@ class EloquentModelHydrateRawStub extends Model
     {
         $mock = m::mock('Illuminate\Database\Connection');
         $mock->shouldReceive('select')->once()->with('SELECT ?', ['foo'])->andReturn([]);
-
-        return $mock;
-    }
-}
-
-class EloquentModelFindManyStub extends Model
-{
-    public function newQuery()
-    {
-        $mock = m::mock('Illuminate\Database\Eloquent\Builder');
-        $mock->shouldReceive('find')->once()->with([1, 2], ['*'])->andReturn('foo');
 
         return $mock;
     }
@@ -1472,6 +1469,42 @@ class EloquentModelAppendsStub extends Model
     public function getStudlyCasedAttribute()
     {
         return 'StudlyCased';
+    }
+}
+
+class EloquentModelGetMutatorsStub extends Model
+{
+    public static function resetMutatorCache()
+    {
+        static::$mutatorCache = [];
+    }
+
+    public function getFirstNameAttribute()
+    {
+    }
+
+    public function getMiddleNameAttribute()
+    {
+    }
+
+    public function getLastNameAttribute()
+    {
+    }
+
+    public function doNotgetFirstInvalidAttribute()
+    {
+    }
+
+    public function doNotGetSecondInvalidAttribute()
+    {
+    }
+
+    public function doNotgetThirdInvalidAttributeEither()
+    {
+    }
+
+    public function doNotGetFourthInvalidAttributeEither()
+    {
     }
 }
 

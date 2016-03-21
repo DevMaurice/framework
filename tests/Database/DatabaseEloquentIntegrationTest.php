@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Capsule\Manager as DB;
 use Illuminate\Database\Eloquent\Model as Eloquent;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Pagination\AbstractPaginator as Paginator;
@@ -8,62 +9,59 @@ use Illuminate\Pagination\AbstractPaginator as Paginator;
 class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
 {
     /**
-     * Bootstrap Eloquent.
-     *
-     * @return void
-     */
-    public static function setUpBeforeClass()
-    {
-        Eloquent::setConnectionResolver(
-            new DatabaseIntegrationTestConnectionResolver
-        );
-
-        Eloquent::setEventDispatcher(
-            new Illuminate\Events\Dispatcher
-        );
-    }
-
-    /**
-     * Tear down Eloquent.
-     */
-    public static function tearDownAfterClass()
-    {
-        Eloquent::unsetEventDispatcher();
-        Eloquent::unsetConnectionResolver();
-    }
-
-    /**
      * Setup the database schema.
      *
      * @return void
      */
     public function setUp()
     {
-        $this->schema()->create('users', function ($table) {
-            $table->increments('id');
-            $table->string('email')->unique();
-            $table->timestamps();
-        });
+        $db = new DB;
 
-        $this->schema()->create('friends', function ($table) {
-            $table->integer('user_id');
-            $table->integer('friend_id');
-        });
+        $db->addConnection([
+            'driver'    => 'sqlite',
+            'database'  => ':memory:',
+        ]);
 
-        $this->schema()->create('posts', function ($table) {
-            $table->increments('id');
-            $table->integer('user_id');
-            $table->integer('parent_id')->nullable();
-            $table->string('name');
-            $table->timestamps();
-        });
+        $db->addConnection([
+            'driver'    => 'sqlite',
+            'database'  => ':memory:',
+        ], 'second_connection');
 
-        $this->schema()->create('photos', function ($table) {
-            $table->increments('id');
-            $table->morphs('imageable');
-            $table->string('name');
-            $table->timestamps();
-        });
+        $db->bootEloquent();
+        $db->setAsGlobal();
+
+        $this->createSchema();
+    }
+
+    protected function createSchema()
+    {
+        foreach (['default', 'second_connection'] as $connection) {
+            $this->schema($connection)->create('users', function ($table) {
+                $table->increments('id');
+                $table->string('email');
+                $table->timestamps();
+            });
+
+            $this->schema($connection)->create('friends', function ($table) {
+                $table->integer('user_id');
+                $table->integer('friend_id');
+            });
+
+            $this->schema($connection)->create('posts', function ($table) {
+                $table->increments('id');
+                $table->integer('user_id');
+                $table->integer('parent_id')->nullable();
+                $table->string('name');
+                $table->timestamps();
+            });
+
+            $this->schema($connection)->create('photos', function ($table) {
+                $table->increments('id');
+                $table->morphs('imageable');
+                $table->string('name');
+                $table->timestamps();
+            });
+        }
     }
 
     /**
@@ -73,10 +71,12 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
      */
     public function tearDown()
     {
-        $this->schema()->drop('users');
-        $this->schema()->drop('friends');
-        $this->schema()->drop('posts');
-        $this->schema()->drop('photos');
+        foreach (['default', 'second_connection'] as $connection) {
+            $this->schema($connection)->drop('users');
+            $this->schema($connection)->drop('friends');
+            $this->schema($connection)->drop('posts');
+            $this->schema($connection)->drop('photos');
+        }
 
         Relation::morphMap([], false);
     }
@@ -243,15 +243,20 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
 
     public function testBasicModelHydration()
     {
-        EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
-        EloquentTestUser::create(['email' => 'abigailotwell@gmail.com']);
+        $user = new EloquentTestUser(['email' => 'taylorotwell@gmail.com']);
+        $user->setConnection('second_connection');
+        $user->save();
 
-        $models = EloquentTestUser::hydrateRaw('SELECT * FROM users WHERE email = ?', ['abigailotwell@gmail.com'], 'foo_connection');
+        $user = new EloquentTestUser(['email' => 'abigailotwell@gmail.com']);
+        $user->setConnection('second_connection');
+        $user->save();
+
+        $models = EloquentTestUser::hydrateRaw('SELECT * FROM users WHERE email = ?', ['abigailotwell@gmail.com'], 'second_connection');
 
         $this->assertInstanceOf('Illuminate\Database\Eloquent\Collection', $models);
         $this->assertInstanceOf('EloquentTestUser', $models[0]);
         $this->assertEquals('abigailotwell@gmail.com', $models[0]->email);
-        $this->assertEquals('foo_connection', $models[0]->getConnectionName());
+        $this->assertEquals('second_connection', $models[0]->getConnectionName());
         $this->assertEquals(1, $models->count());
     }
 
@@ -261,6 +266,68 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
         $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
 
         $results = EloquentTestUser::has('friends')->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
+    }
+
+    public function testWhereHasOnSelfReferencingBelongsToManyRelationship()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
+
+        $results = EloquentTestUser::whereHas('friends', function ($query) {
+            $query->where('email', 'abigailotwell@gmail.com');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
+    }
+
+    public function testHasOnNestedSelfReferencingBelongsToManyRelationship()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
+        $nestedFriend = $friend->friends()->create(['email' => 'foo@gmail.com']);
+
+        $results = EloquentTestUser::has('friends.friends')->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
+    }
+
+    public function testWhereHasOnNestedSelfReferencingBelongsToManyRelationship()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
+        $nestedFriend = $friend->friends()->create(['email' => 'foo@gmail.com']);
+
+        $results = EloquentTestUser::whereHas('friends.friends', function ($query) {
+            $query->where('email', 'foo@gmail.com');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
+    }
+
+    public function testHasOnSelfReferencingBelongsToManyRelationshipWithWherePivot()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
+
+        $results = EloquentTestUser::has('friendsOne')->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
+    }
+
+    public function testHasOnNestedSelfReferencingBelongsToManyRelationshipWithWherePivot()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $friend = $user->friends()->create(['email' => 'abigailotwell@gmail.com']);
+        $nestedFriend = $friend->friends()->create(['email' => 'foo@gmail.com']);
+
+        $results = EloquentTestUser::has('friendsOne.friendsTwo')->get();
 
         $this->assertEquals(1, count($results));
         $this->assertEquals('taylorotwell@gmail.com', $results->first()->email);
@@ -277,6 +344,45 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('Child Post', $results->first()->name);
     }
 
+    public function testWhereHasOnSelfReferencingBelongsToRelationship()
+    {
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'user_id' => 1]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 2]);
+
+        $results = EloquentTestPost::whereHas('parentPost', function ($query) {
+            $query->where('name', 'Parent Post');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Child Post', $results->first()->name);
+    }
+
+    public function testHasOnNestedSelfReferencingBelongsToRelationship()
+    {
+        $grandParentPost = EloquentTestPost::create(['name' => 'Grandparent Post', 'user_id' => 1]);
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'parent_id' => $grandParentPost->id, 'user_id' => 2]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 3]);
+
+        $results = EloquentTestPost::has('parentPost.parentPost')->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Child Post', $results->first()->name);
+    }
+
+    public function testWhereHasOnNestedSelfReferencingBelongsToRelationship()
+    {
+        $grandParentPost = EloquentTestPost::create(['name' => 'Grandparent Post', 'user_id' => 1]);
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'parent_id' => $grandParentPost->id, 'user_id' => 2]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 3]);
+
+        $results = EloquentTestPost::whereHas('parentPost.parentPost', function ($query) {
+            $query->where('name', 'Grandparent Post');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Child Post', $results->first()->name);
+    }
+
     public function testHasOnSelfReferencingHasManyRelationship()
     {
         $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'user_id' => 1]);
@@ -286,6 +392,45 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
 
         $this->assertEquals(1, count($results));
         $this->assertEquals('Parent Post', $results->first()->name);
+    }
+
+    public function testWhereHasOnSelfReferencingHasManyRelationship()
+    {
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'user_id' => 1]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 2]);
+
+        $results = EloquentTestPost::whereHas('childPosts', function ($query) {
+            $query->where('name', 'Child Post');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Parent Post', $results->first()->name);
+    }
+
+    public function testHasOnNestedSelfReferencingHasManyRelationship()
+    {
+        $grandParentPost = EloquentTestPost::create(['name' => 'Grandparent Post', 'user_id' => 1]);
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'parent_id' => $grandParentPost->id, 'user_id' => 2]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 3]);
+
+        $results = EloquentTestPost::has('childPosts.childPosts')->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Grandparent Post', $results->first()->name);
+    }
+
+    public function testWhereHasOnNestedSelfReferencingHasManyRelationship()
+    {
+        $grandParentPost = EloquentTestPost::create(['name' => 'Grandparent Post', 'user_id' => 1]);
+        $parentPost = EloquentTestPost::create(['name' => 'Parent Post', 'parent_id' => $grandParentPost->id, 'user_id' => 2]);
+        $childPost = EloquentTestPost::create(['name' => 'Child Post', 'parent_id' => $parentPost->id, 'user_id' => 3]);
+
+        $results = EloquentTestPost::whereHas('childPosts.childPosts', function ($query) {
+            $query->where('name', 'Child Post');
+        })->get();
+
+        $this->assertEquals(1, count($results));
+        $this->assertEquals('Grandparent Post', $results->first()->name);
     }
 
     public function testBelongsToManyRelationshipModelsAreProperlyHydratedOverChunkedRequest()
@@ -311,6 +456,26 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
 
         $post = EloquentTestPost::with('user')->where('name', 'First Post')->get();
         $this->assertEquals('taylorotwell@gmail.com', $post->first()->user->email);
+    }
+
+    public function testBasicNestedSelfReferencingHasManyEagerLoading()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylorotwell@gmail.com']);
+        $post = $user->posts()->create(['name' => 'First Post']);
+        $post->childPosts()->create(['name' => 'Child Post', 'user_id' => $user->id]);
+
+        $user = EloquentTestUser::with('posts.childPosts')->where('email', 'taylorotwell@gmail.com')->first();
+
+        $this->assertNotNull($user->posts->first());
+        $this->assertEquals('First Post', $user->posts->first()->name);
+
+        $this->assertNotNull($user->posts->first()->childPosts->first());
+        $this->assertEquals('Child Post', $user->posts->first()->childPosts->first()->name);
+
+        $post = EloquentTestPost::with('parentPost.user')->where('name', 'Child Post')->get();
+        $this->assertNotNull($post->first()->parentPost);
+        $this->assertNotNull($post->first()->parentPost->user);
+        $this->assertEquals('taylorotwell@gmail.com', $post->first()->parentPost->user->email);
     }
 
     public function testBasicMorphManyRelationship()
@@ -421,9 +586,37 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
 
     public function testEmptyMorphToRelationship()
     {
-        $photo = EloquentTestPhoto::create(['name' => 'Avatar 1']);
+        $photo = new EloquentTestPhoto;
 
         $this->assertNull($photo->imageable);
+    }
+
+    public function testSaveOrFail()
+    {
+        $date = '1970-01-01';
+        $post = new EloquentTestPost([
+            'user_id' => 1, 'name' => 'Post', 'created_at' => $date, 'updated_at' => $date,
+        ]);
+
+        $this->assertTrue($post->saveOrFail());
+        $this->assertEquals(1, EloquentTestPost::count());
+    }
+
+    /**
+     * @expectedException Exception
+     */
+    public function testSaveOrFailWithDuplicatedEntry()
+    {
+        $date = '1970-01-01';
+        EloquentTestPost::create([
+            'id' => 1, 'user_id' => 1, 'name' => 'Post', 'created_at' => $date, 'updated_at' => $date,
+        ]);
+
+        $post = new EloquentTestPost([
+            'id' => 1, 'user_id' => 1, 'name' => 'Post', 'created_at' => $date, 'updated_at' => $date,
+        ]);
+
+        $post->saveOrFail();
     }
 
     public function testMultiInsertsWithDifferentValues()
@@ -468,6 +661,41 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
         });
     }
 
+    public function testNestedTransactionsUsingSaveOrFailWillSucceed()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylor@laravel.com']);
+        $this->connection()->transaction(function () use ($user) {
+            try {
+                $user->email = 'otwell@laravel.com';
+                $user->saveOrFail();
+            } catch (Exception $e) {
+                // ignore the exception
+            }
+
+            $user = EloquentTestUser::first();
+            $this->assertEquals('otwell@laravel.com', $user->email);
+            $this->assertEquals(1, $user->id);
+        });
+    }
+
+    public function testNestedTransactionsUsingSaveOrFailWillFails()
+    {
+        $user = EloquentTestUser::create(['email' => 'taylor@laravel.com']);
+        $this->connection()->transaction(function () use ($user) {
+            try {
+                $user->id = 'invalid';
+                $user->email = 'otwell@laravel.com';
+                $user->saveOrFail();
+            } catch (Exception $e) {
+                // ignore the exception
+            }
+
+            $user = EloquentTestUser::first();
+            $this->assertEquals('taylor@laravel.com', $user->email);
+            $this->assertEquals(1, $user->id);
+        });
+    }
+
     public function testToArrayIncludesDefaultFormattedTimestamps()
     {
         $model = new EloquentTestUser;
@@ -508,9 +736,9 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
      *
      * @return Connection
      */
-    protected function connection()
+    protected function connection($connection = 'default')
     {
-        return Eloquent::getConnectionResolver()->connection();
+        return Eloquent::getConnectionResolver()->connection($connection);
     }
 
     /**
@@ -518,9 +746,9 @@ class DatabaseEloquentIntegrationTest extends PHPUnit_Framework_TestCase
      *
      * @return Schema\Builder
      */
-    protected function schema()
+    protected function schema($connection = 'default')
     {
-        return $this->connection()->getSchemaBuilder();
+        return $this->connection($connection)->getSchemaBuilder();
     }
 }
 
@@ -535,6 +763,16 @@ class EloquentTestUser extends Eloquent
     public function friends()
     {
         return $this->belongsToMany('EloquentTestUser', 'friends', 'user_id', 'friend_id');
+    }
+
+    public function friendsOne()
+    {
+        return $this->belongsToMany('EloquentTestUser', 'friends', 'user_id', 'friend_id')->wherePivot('user_id', 1);
+    }
+
+    public function friendsTwo()
+    {
+        return $this->belongsToMany('EloquentTestUser', 'friends', 'user_id', 'friend_id')->wherePivot('user_id', 2);
     }
 
     public function posts()
@@ -587,32 +825,5 @@ class EloquentTestPhoto extends Eloquent
     public function imageable()
     {
         return $this->morphTo();
-    }
-}
-
-/**
- * Connection Resolver.
- */
-class DatabaseIntegrationTestConnectionResolver implements Illuminate\Database\ConnectionResolverInterface
-{
-    protected $connection;
-
-    public function connection($name = null)
-    {
-        if (isset($this->connection)) {
-            return $this->connection;
-        }
-
-        return $this->connection = new Illuminate\Database\SQLiteConnection(new PDO('sqlite::memory:'));
-    }
-
-    public function getDefaultConnection()
-    {
-        return 'default';
-    }
-
-    public function setDefaultConnection($name)
-    {
-        //
     }
 }
